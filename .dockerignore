@@ -1,22 +1,22 @@
-# 模型权重绝不进镜像（运行时挂载）
+# Model weights never go into the image (mounted at runtime)
 checkpoints/
 models/
 outputs/
 prompts/
 
-# Python 产物
+# Python artifacts
 __pycache__/
 *.pyc
 .venv/
 *.egg-info/
 
-# 本地环境/工具
+# Local environment/tools
 .env
 .git/
 .gitignore
 uv.lock.bak
 
-# 文档与示例（减小构建上下文）
+# Docs and examples (reduce build context)
 docs/
 assets/
 archive/
@@ -25,7 +25,7 @@ tests/
 cli_tests/
 backends/
 
-# Docker 自身
+# Docker itself
 Dockerfile
 docker-compose.yml
 .dockerignore

@@ -1,9 +1,9 @@
-# 模型权重（运行时挂载，绝不进仓库）
+# Model weights (mounted at runtime, never in the repo)
 checkpoints/
 models/
 hf_cache/
 
-# 音色参考音频（运行时挂载）
+# Voice reference audio (mounted at runtime)
 voices/
 *.wav
 *.mp3
@@ -12,12 +12,12 @@ voices/
 *.m4a
 *.aac
 
-# 输出
+# Outputs
 outputs/
 prompts/
 *.log
 
-# Python 产物
+# Python artifacts
 __pycache__/
 *.pyc
 *.pyo
@@ -26,11 +26,11 @@ venv/
 *.egg-info/
 .pytest_cache/
 
-# 本地环境
+# Local environment
 .env
 .env.*
 
-# 编辑器/系统
+# Editor/system
 .vscode/
 .idea/
 .DS_Store

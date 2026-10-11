@@ -1,27 +1,27 @@
-"""IndexTTS-2.5 FastAPI HTTP 服务。
+"""IndexTTS-2.5 FastAPI HTTP service.
 
-把 IndexTTS2 的推理能力暴露成 REST API，方便其他程序通过 HTTP 调用。
+Exposes IndexTTS2 inference as a REST API for HTTP-based integration.
 
-启动（注意：本地服务必须取消代理，否则 gradio/uvicorn 自检会走代理失败）：
+Startup (note: local service must unset proxy, otherwise gradio/uvicorn self-check will fail through proxy):
 
     cd /home/iamyb/github/index-tts
     env -u http_proxy -u https_proxy -u all_proxy \
         USE_MODELSCOPE=false HF_ENDPOINT=https://hf-mirror.com \
         /home/iamyb/miniconda3/envs/indextts/bin/python api_server.py --port 8000
 
-接口：
-    GET  /health          健康检查
-    POST /tts             文本 + 参考音频 -> WAV 音频
-    POST /tts/json        JSON 方式合成（参考音频用本地路径）
-    POST /tts/stream      同上，但用 SSE 流式返回音频分块（低首包延迟）
-    POST /v1/audio/speech OpenAI 兼容合成（voice 映射到 voices 目录；模型参数放 extra_params）
-    GET  /v1/voices       列出可用音色
-    POST /v1/voices       上传新音色（需 consent 授权声明）
-    DELETE /v1/voices/{id} 删除音色
+Endpoints:
+    GET  /health          Health check
+    POST /tts             Text + reference audio -> WAV audio
+    POST /tts/json        JSON-based synthesis (reference audio via local path)
+    POST /tts/stream      Same as above, but returns audio chunks via SSE streaming (low first-packet latency)
+    POST /v1/audio/speech OpenAI-compatible synthesis (voice maps to voices directory; model params in extra_params)
+    GET  /v1/voices       List available voices
+    POST /v1/voices       Upload a new voice (requires consent declaration)
+    DELETE /v1/voices/{id} Delete a voice
 
-示例（curl）：
+Example (curl):
     curl -X POST http://127.0.0.1:8000/tts \
-        -F "text=你好，欢迎使用 IndexTTS。" \
+        -F "text=Hello, welcome to IndexTTS." \
         -F "ref_audio=@examples/voice_01.wav" \
         -F "lang=ZH" \
         -o out.wav
@@ -43,32 +43,32 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
-# 模型加载
+# Model loading
 # ---------------------------------------------------------------------------
 
-# 全局单例：模型 + GPU 推理锁
+# Global singleton: model + GPU inference lock
 TTS = None
 GPU_LOCK = threading.Lock()
 SERVER_ARGS = None
-# 音色目录（OpenAI 兼容接口的 voice 映射到这里的音频文件）
+# Voices directory (OpenAI-compatible voice IDs map to audio files here)
 VOICES_DIR = os.environ.get("VOICES_DIR", "voices")
 
 
 def build_tts(args):
-    """构建 IndexTTS2 实例（与 webui.py 的 build_tts 逻辑一致）。"""
+    """Build an IndexTTS2 instance (same logic as build_tts in webui.py)."""
     from indextts.infer_v2_5 import IndexTTS2
 
     model_dir = args.model_dir
     cfg_path = os.path.join(model_dir, "config.yaml")
     if not os.path.isfile(cfg_path):
-        raise FileNotFoundError(f"找不到配置文件: {cfg_path}")
+        raise FileNotFoundError(f"Config file not found: {cfg_path}")
 
-    # 确保辅助模型（w2v-bert / campplus / bigvgan 等）已就位
+    # Ensure auxiliary models (w2v-bert / campplus / bigvgan, etc.) are in place
     try:
         from indextts.utils.model_download import ensure_models_available
         ensure_models_available(model_dir)
-    except Exception as e:  # 下载失败不阻塞启动，推理时若缺文件会再报错
-        print(f">> 警告: ensure_models_available 失败: {e}")
+    except Exception as e:  # Download failure does not block startup; missing files will error at inference time
+        print(f">> Warning: ensure_models_available failed: {e}")
 
     kwargs = dict(
         model_dir=model_dir,
@@ -84,16 +84,16 @@ def build_tts(args):
     else:
         kwargs["use_bf16"] = False
 
-    print(f">> 正在加载 IndexTTS2 模型 (model_dir={model_dir}) ...")
+    print(f">> Loading IndexTTS2 model (model_dir={model_dir}) ...")
     t0 = time.time()
     tts = IndexTTS2(**kwargs)
-    print(f">> 模型加载完成，耗时 {time.time() - t0:.1f}s")
+    print(f">> Model loaded in {time.time() - t0:.1f}s")
     return tts
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时加载模型，关闭时释放。"""
+    """Application lifecycle: load model on startup, release on shutdown."""
     global TTS
     TTS = build_tts(SERVER_ARGS)
     yield
@@ -102,23 +102,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="IndexTTS-2.5 API",
-    description="IndexTTS-2.5 零样本语音合成 HTTP 服务",
+    description="IndexTTS-2.5 zero-shot text-to-speech HTTP service",
     version="1.0.0",
     lifespan=lifespan,
 )
 
-# 允许上传的音频扩展名
+# Allowed audio extensions for upload
 ALLOWED_AUDIO_EXT = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma"}
 
 
 def _save_upload(upload: UploadFile) -> str:
-    """把上传的音频保存到临时文件，返回路径。校验扩展名。"""
+    """Save uploaded audio to a temp file and return the path. Validates extension."""
     ext = os.path.splitext(upload.filename or "")[1].lower()
     if ext not in ALLOWED_AUDIO_EXT:
         raise HTTPException(
             status_code=400,
-            detail=f"不支持的音频格式: {ext or '(无扩展名)'}，"
-                   f"支持: {', '.join(sorted(ALLOWED_AUDIO_EXT))}",
+            detail=f"Unsupported audio format: {ext or '(no extension)'}."
+                   f" Supported: {', '.join(sorted(ALLOWED_AUDIO_EXT))}",
         )
     suffix = ext or ".wav"
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -128,7 +128,7 @@ def _save_upload(upload: UploadFile) -> str:
 
 
 def _clean(path: Optional[str]):
-    """删除临时文件（忽略错误）。"""
+    """Remove a temp file (ignore errors)."""
     if path and os.path.isfile(path):
         try:
             os.remove(path)
@@ -137,11 +137,11 @@ def _clean(path: Optional[str]):
 
 
 # ---------------------------------------------------------------------------
-# 音色管理（OpenAI 兼容 /v1/voices）
+# Voice management (OpenAI-compatible /v1/voices)
 # ---------------------------------------------------------------------------
 
 def _list_voices() -> list[str]:
-    """列出音色目录中所有可用音色 id（文件名去扩展名）。"""
+    """List all available voice IDs in the voices directory (filename without extension)."""
     if not os.path.isdir(VOICES_DIR):
         return []
     ids = []
@@ -153,32 +153,32 @@ def _list_voices() -> list[str]:
 
 
 def _resolve_voice(voice: str) -> str:
-    """把 voice id 解析成参考音频文件路径，找不到则 400。"""
+    """Resolve a voice ID to a reference audio file path; raises 400 if not found."""
     for ext in sorted(ALLOWED_AUDIO_EXT):
         path = os.path.join(VOICES_DIR, voice + ext)
         if os.path.isfile(path):
             return path
     raise HTTPException(
         status_code=400,
-        detail=f"找不到音色 '{voice}'。可用音色: {', '.join(_list_voices()) or '(空，请先上传)'}",
+        detail=f"Voice '{voice}' not found. Available voices: {', '.join(_list_voices()) or '(empty, please upload first)'}",
     )
 
 
 # ---------------------------------------------------------------------------
-# 请求模型
+# Request models
 # ---------------------------------------------------------------------------
 
 class TTSRequest(BaseModel):
-    """JSON 方式的 /tts 请求体（参考音频用本地路径）。"""
-    text: str = Field(..., description="要合成的文本")
-    ref_audio: str = Field(..., description="参考音频的本地路径（用于音色克隆）")
-    lang: str = Field("ZH", description="语言: ZH / EN / JA / YUE 等")
-    # 情感控制
-    emo_ref_audio: Optional[str] = Field(None, description="情感参考音频路径（可选）")
-    emo_alpha: float = Field(1.0, description="情感参考音频强度 0~1+")
-    emo_vector: Optional[list] = Field(None, description="8 维情感向量 [happy,angry,sad,afraid,disgusted,melancholic,surprised,calm]")
-    emo_text: Optional[str] = Field(None, description="情感描述文本（需 --qwen_emo）")
-    # 采样参数
+    """JSON request body for /tts (reference audio via local path)."""
+    text: str = Field(..., description="Text to synthesize")
+    ref_audio: str = Field(..., description="Local path to reference audio (for voice cloning)")
+    lang: str = Field("ZH", description="Language: ZH / EN / JA / YUE, etc.")
+    # Emotion control
+    emo_ref_audio: Optional[str] = Field(None, description="Emotion reference audio path (optional)")
+    emo_alpha: float = Field(1.0, description="Emotion reference audio intensity 0~1+")
+    emo_vector: Optional[list] = Field(None, description="8-dim emotion vector [happy,angry,sad,afraid,disgusted,melancholic,surprised,calm]")
+    emo_text: Optional[str] = Field(None, description="Emotion description text (requires --qwen_emo)")
+    # Sampling parameters
     do_sample: bool = True
     top_p: float = 0.8
     top_k: int = 3
@@ -212,11 +212,11 @@ def _run_infer(
     text_normalization: bool = True,
     use_random: bool = False,
 ):
-    """调用 TTS.infer，返回 (sampling_rate, wav_int16_ndarray) 或生成器。"""
+    """Call TTS.infer, returning (sampling_rate, wav_int16_ndarray) or a generator."""
     if TTS is None:
-        raise HTTPException(status_code=503, detail="模型尚未加载完成")
+        raise HTTPException(status_code=503, detail="Model not yet loaded")
 
-    # use_emo_text 未显式指定时，沿用"有 emo_text 即启用"的旧行为
+    # When use_emo_text is not explicitly set, fall back to legacy behavior: enable if emo_text is present
     if use_emo_text is None:
         use_emo_text = bool(emo_text)
 
@@ -233,7 +233,7 @@ def _run_infer(
     infer_kwargs = dict(
         spk_audio_prompt=ref_audio,
         text=text,
-        output_path=None,  # 不写文件，直接拿 numpy 数据
+        output_path=None,  # Don't write to file; get numpy data directly
         lang=lang,
         emo_audio_prompt=emo_ref_audio,
         emo_alpha=float(emo_alpha),
@@ -248,23 +248,23 @@ def _run_infer(
         **gen_kwargs,
     )
 
-    with GPU_LOCK:  # 单卡串行，避免并发 OOM
+    with GPU_LOCK:  # Single-GPU serialization to avoid concurrent OOM
         result = TTS.infer(**infer_kwargs)
     return result
 
 
 def _result_to_wav_bytes(result) -> tuple[int, bytes]:
-    """把 infer 的返回值转成 (sampling_rate, wav_bytes)。
+    """Convert infer's return value to (sampling_rate, wav_bytes).
 
-    infer 返回 (sampling_rate, wav_data)，其中 wav_data 是 int16 numpy，
-    形状 (N, 1)（已 .T 过），值域 [-32767, 32767]。这里复用项目自带的
-    save_pcm_wav（与 webui 相同的 torchaudio 写盘路径）写到临时文件再读回，
-    保证 WAV 格式兼容。
+    infer returns (sampling_rate, wav_data), where wav_data is int16 numpy,
+    shape (N, 1) (already transposed), range [-32767, 32767]. This reuses the
+    project's save_pcm_wav (same torchaudio write path as webui) to write to a
+    temp file and read it back, ensuring WAV format compatibility.
     """
     if result is None:
-        raise HTTPException(status_code=500, detail="推理失败，未返回音频")
+        raise HTTPException(status_code=500, detail="Inference failed, no audio returned")
     if not (isinstance(result, tuple) and len(result) == 2):
-        raise HTTPException(status_code=500, detail=f"意外的推理返回类型: {type(result)}")
+        raise HTTPException(status_code=500, detail=f"Unexpected inference return type: {type(result)}")
 
     sampling_rate, wav_data = result
     # wav_data: int16 numpy (N, 1) -> torch (1, N)
@@ -273,7 +273,7 @@ def _result_to_wav_bytes(result) -> tuple[int, bytes]:
         wav = wav.unsqueeze(0)
     elif wav.shape[0] != 1:
         wav = wav.t().contiguous()  # (N,1) -> (1,N)
-    # save_pcm_wav 期望 PCM 尺度 ([-32767,32767]) 的 tensor
+    # save_pcm_wav expects a tensor in PCM scale ([-32767, 32767])
     if wav.dtype != torch.int16:
         wav = (wav * 32767).clamp(-32768, 32767).to(torch.int16)
 
@@ -290,7 +290,7 @@ def _result_to_wav_bytes(result) -> tuple[int, bytes]:
 
 
 # ---------------------------------------------------------------------------
-# 路由
+# Routes
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
@@ -305,11 +305,11 @@ def health():
 
 @app.post("/tts")
 async def tts(
-    text: str = Form(..., description="要合成的文本"),
-    ref_audio: UploadFile = File(..., description="参考音频（音色克隆）"),
-    lang: str = Form("ZH", description="语言: ZH / EN / JA / YUE"),
-    emo_ref_audio: Optional[UploadFile] = File(None, description="情感参考音频（可选）"),
-    emo_alpha: float = Form(1.0, description="情感参考音频强度"),
+    text: str = Form(..., description="Text to synthesize"),
+    ref_audio: UploadFile = File(..., description="Reference audio (voice cloning)"),
+    lang: str = Form("ZH", description="Language: ZH / EN / JA / YUE"),
+    emo_ref_audio: Optional[UploadFile] = File(None, description="Emotion reference audio (optional)"),
+    emo_alpha: float = Form(1.0, description="Emotion reference audio intensity"),
     do_sample: bool = Form(True),
     top_p: float = Form(0.8),
     top_k: int = Form(3),
@@ -320,7 +320,7 @@ async def tts(
     duration_factor: float = Form(1.0),
     max_text_tokens_per_segment: int = Form(120),
 ):
-    """multipart/form-data 方式合成，返回 WAV 二进制。"""
+    """Synthesize via multipart/form-data, returns WAV binary."""
     ref_path = _save_upload(ref_audio)
     emo_path = _save_upload(emo_ref_audio) if emo_ref_audio is not None else None
     try:
@@ -337,7 +337,7 @@ async def tts(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"推理出错: {e}")
+        raise HTTPException(status_code=500, detail=f"Inference error: {e}")
     finally:
         _clean(ref_path)
         _clean(emo_path)
@@ -351,9 +351,9 @@ async def tts(
 
 @app.post("/tts/json")
 def tts_json(req: TTSRequest):
-    """JSON 方式合成（参考音频用本地路径），返回 WAV 二进制。"""
+    """Synthesize via JSON (reference audio via local path), returns WAV binary."""
     if not os.path.isfile(req.ref_audio):
-        raise HTTPException(status_code=400, detail=f"参考音频不存在: {req.ref_audio}")
+        raise HTTPException(status_code=400, detail=f"Reference audio not found: {req.ref_audio}")
     try:
         result = _run_infer(
             text=req.text, ref_audio=req.ref_audio, lang=req.lang,
@@ -369,7 +369,7 @@ def tts_json(req: TTSRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"推理出错: {e}")
+        raise HTTPException(status_code=500, detail=f"Inference error: {e}")
 
     return Response(
         content=wav_bytes,
@@ -380,10 +380,10 @@ def tts_json(req: TTSRequest):
 
 @app.post("/tts/stream")
 async def tts_stream(
-    text: str = Form(..., description="要合成的文本"),
-    ref_audio: UploadFile = File(..., description="参考音频（音色克隆）"),
-    lang: str = Form("ZH", description="语言: ZH / EN / JA / YUE"),
-    emo_ref_audio: Optional[UploadFile] = File(None, description="情感参考音频（可选）"),
+    text: str = Form(..., description="Text to synthesize"),
+    ref_audio: UploadFile = File(..., description="Reference audio (voice cloning)"),
+    lang: str = Form("ZH", description="Language: ZH / EN / JA / YUE"),
+    emo_ref_audio: Optional[UploadFile] = File(None, description="Emotion reference audio (optional)"),
     emo_alpha: float = Form(1.0),
     do_sample: bool = Form(True),
     top_p: float = Form(0.8),
@@ -395,7 +395,7 @@ async def tts_stream(
     duration_factor: float = Form(1.0),
     max_text_tokens_per_segment: int = Form(120),
 ):
-    """SSE 流式合成：边生成边推送 WAV 分块（base64），最后一条带元信息。"""
+    """SSE streaming synthesis: pushes WAV chunks (base64) as they are generated; last event carries metadata."""
     ref_path = _save_upload(ref_audio)
     emo_path = _save_upload(emo_ref_audio) if emo_ref_audio is not None else None
 
@@ -435,29 +435,30 @@ async def tts_stream(
 
 
 # ---------------------------------------------------------------------------
-# OpenAI 兼容接口（/v1/audio/speech + /v1/voices）
+# OpenAI-compatible endpoints (/v1/audio/speech + /v1/voices)
 # ---------------------------------------------------------------------------
 
 class OpenAISpeechRequest(BaseModel):
-    """OpenAI /v1/audio/speech 请求体（额外字段透传给 IndexTTS）。
+    """OpenAI /v1/audio/speech request body (extra fields are passed through to IndexTTS).
 
-    模型特有参数（lang / 情感 / 文本规范化等）推荐放进 extra_params 对象，
-    与 vLLM-Omni 的 OpenAI 兼容约定一致；也兼容直接平铺在顶层的旧写法。
+    Model-specific parameters (lang / emotion / text normalization, etc.) are recommended
+    to be placed in the extra_params object, consistent with vLLM-Omni's OpenAI-compatible
+    convention; flat top-level fields are also supported for backward compatibility.
     """
-    model: str = Field("indextts", description="模型名（忽略，兼容用）")
-    input: str = Field(..., description="要合成的文本")
-    voice: str = Field(..., description="音色 id（对应 voices 目录中的音频文件名）")
-    response_format: str = Field("wav", description="响应格式（本服务始终返回 16-bit PCM WAV）")
-    speed: Optional[float] = Field(None, description="语速 [0.5, 2.0]，>1 更快；映射到 duration_factor=1/speed")
-    # 模型特有参数（推荐放这里，优先级高于下方平铺字段）
+    model: str = Field("indextts", description="Model name (ignored, for compatibility)")
+    input: str = Field(..., description="Text to synthesize")
+    voice: str = Field(..., description="Voice ID (maps to an audio filename in the voices directory)")
+    response_format: str = Field("wav", description="Response format (this service always returns 16-bit PCM WAV)")
+    speed: Optional[float] = Field(None, description="Speed [0.5, 2.0], >1 is faster; maps to duration_factor=1/speed")
+    # Model-specific parameters (recommended here; takes priority over flat fields below)
     extra_params: Optional[dict] = Field(
         None,
-        description="模型特有参数: lang / text_normalization / emo_vector / emo_alpha / emo_text / use_emo_text / emo_audio / use_random",
+        description="Model-specific params: lang / text_normalization / emo_vector / emo_alpha / emo_text / use_emo_text / emo_audio / use_random",
     )
-    # IndexTTS 特有参数（平铺写法，兼容用；extra_params 中的同名键会覆盖）
-    lang: str = Field("ZH", description="语言: ZH / EN / JA / YUE")
-    emo_alpha: float = Field(1.0, description="情感强度")
-    emo_vector: Optional[list] = Field(None, description="8 维情感向量 [happy,angry,sad,afraid,disgusted,melancholic,surprised,calm]")
+    # IndexTTS-specific parameters (flat style, for compatibility; same-named keys in extra_params override)
+    lang: str = Field("ZH", description="Language: ZH / EN / JA / YUE")
+    emo_alpha: float = Field(1.0, description="Emotion intensity")
+    emo_vector: Optional[list] = Field(None, description="8-dim emotion vector [happy,angry,sad,afraid,disgusted,melancholic,surprised,calm]")
     do_sample: bool = True
     top_p: float = 0.8
     top_k: int = 3
@@ -470,19 +471,19 @@ class OpenAISpeechRequest(BaseModel):
 
 @app.post("/v1/audio/speech")
 def openai_speech(req: OpenAISpeechRequest):
-    """OpenAI 兼容的语音合成接口，返回 16-bit PCM WAV。
+    """OpenAI-compatible speech synthesis endpoint, returns 16-bit PCM WAV.
 
-    任何 OpenAI SDK 客户端只需改 base_url 即可使用：
+    Any OpenAI SDK client can use it by just changing base_url:
         client = OpenAI(base_url="http://localhost:8000/v1", api_key="not-needed")
-        client.audio.speech.create(model="indextts", voice="voice_01", input="你好")
+        client.audio.speech.create(model="indextts", voice="voice_01", input="Hello")
     """
-    # speed 范围校验（对应 duration_factor，越界 422）
+    # Speed range validation (maps to duration_factor; out of range returns 422)
     speed = req.speed if req.speed is not None else 1.0
     if not (0.5 <= speed <= 2.0):
-        raise HTTPException(status_code=422, detail="speed 必须在 [0.5, 2.0] 范围内")
+        raise HTTPException(status_code=422, detail="speed must be in the range [0.5, 2.0]")
     duration_factor = 1.0 / speed
 
-    # 合并 extra_params（模型特有参数，优先级高于顶层平铺字段）
+    # Merge extra_params (model-specific params, takes priority over flat top-level fields)
     extra = req.extra_params or {}
     lang = extra.get("lang", req.lang)
     emo_alpha = extra.get("emo_alpha", req.emo_alpha)
@@ -510,7 +511,7 @@ def openai_speech(req: OpenAISpeechRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"推理出错: {e}")
+        raise HTTPException(status_code=500, detail=f"Inference error: {e}")
 
     return Response(
         content=wav_bytes,
@@ -521,7 +522,7 @@ def openai_speech(req: OpenAISpeechRequest):
 
 @app.get("/v1/voices")
 def list_voices():
-    """列出可用音色。"""
+    """List available voices."""
     return {
         "object": "list",
         "data": [{"id": v, "object": "voice"} for v in _list_voices()],
@@ -530,31 +531,31 @@ def list_voices():
 
 @app.post("/v1/voices")
 async def create_voice(
-    file: UploadFile = File(..., description="参考音频（3-10 秒清晰人声效果最佳）"),
-    name: Optional[str] = Form(None, description="音色 id（默认用文件名）"),
-    consent: str = Form(..., description="授权声明（必填：克隆真人声音需获得本人同意）"),
-    speaker_description: Optional[str] = Form(None, description="音色描述（可选）"),
+    file: UploadFile = File(..., description="Reference audio (3-10 seconds of clear speech works best)"),
+    name: Optional[str] = Form(None, description="Voice ID (defaults to filename)"),
+    consent: str = Form(..., description="Consent declaration (required: cloning a real person's voice requires their consent)"),
+    speaker_description: Optional[str] = Form(None, description="Voice description (optional)"),
 ):
-    """上传新音色，保存到 voices 目录（volume 持久化）。
+    """Upload a new voice, saved to the voices directory (volume-persisted).
 
-    借鉴 vLLM-Omni 的音色存储约定：上传必须携带 consent 授权声明。
+    Follows vLLM-Omni's voice storage convention: upload must include a consent declaration.
     """
     if not consent or not consent.strip():
-        raise HTTPException(status_code=400, detail="consent 字段必填（音色克隆授权声明）")
+        raise HTTPException(status_code=400, detail="consent field is required (voice cloning consent declaration)")
     os.makedirs(VOICES_DIR, exist_ok=True)
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_AUDIO_EXT:
         raise HTTPException(
             status_code=400,
-            detail=f"不支持的音频格式: {ext or '(无扩展名)'}，"
-                   f"支持: {', '.join(sorted(ALLOWED_AUDIO_EXT))}",
+            detail=f"Unsupported audio format: {ext or '(no extension)'}"
+                   f". Supported: {', '.join(sorted(ALLOWED_AUDIO_EXT))}",
         )
     voice_id = (name or os.path.splitext(file.filename or "")[0]).strip()
     if not voice_id or not all(c.isalnum() or c in "-_" for c in voice_id):
-        raise HTTPException(status_code=400, detail=f"非法音色 id: '{voice_id}'（只允许字母/数字/-/_）")
+        raise HTTPException(status_code=400, detail=f"Invalid voice ID: '{voice_id}' (only alphanumeric, -, _ allowed)")
     dest = os.path.join(VOICES_DIR, voice_id + ext)
     if os.path.exists(dest):
-        raise HTTPException(status_code=409, detail=f"音色 '{voice_id}' 已存在，请先 DELETE 再上传")
+        raise HTTPException(status_code=409, detail=f"Voice '{voice_id}' already exists; DELETE it first before uploading")
     with open(dest, "wb") as f:
         f.write(file.file.read())
     return {"object": "voice", "id": voice_id, "filename": os.path.basename(dest)}
@@ -562,33 +563,33 @@ async def create_voice(
 
 @app.delete("/v1/voices/{voice_id}")
 def delete_voice(voice_id: str):
-    """删除音色。"""
+    """Delete a voice."""
     path = _resolve_voice(voice_id)
     os.remove(path)
     return {"object": "voice.deleted", "id": voice_id, "deleted": True}
 
 
 # ---------------------------------------------------------------------------
-# 入口
+# Entry point
 # ---------------------------------------------------------------------------
 
 def main():
     global SERVER_ARGS
-    parser = argparse.ArgumentParser(description="IndexTTS-2.5 FastAPI 服务")
+    parser = argparse.ArgumentParser(description="IndexTTS-2.5 FastAPI service")
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
-    # 支持 MODEL_DIR 环境变量（Docker 部署时挂载模型目录用）
+    # Supports MODEL_DIR env var (for mounting model directory in Docker deployment)
     parser.add_argument("--model_dir", type=str,
                         default=os.environ.get("MODEL_DIR", "checkpoints"))
-    # 音色目录（OpenAI 兼容接口用），支持 VOICES_DIR 环境变量
+    # Voices directory (for OpenAI-compatible endpoints), supports VOICES_DIR env var
     parser.add_argument("--voices_dir", type=str,
                         default=os.environ.get("VOICES_DIR", "voices"))
-    parser.add_argument("--bf16", action="store_true", help="使用 bfloat16（需 GPU 支持）")
-    parser.add_argument("--qwen_emo", action="store_true", help="加载 QwenEmotion（支持情感文本控制）")
-    parser.add_argument("--accel", action="store_true", help="启用 GPT2 加速引擎（需 flash-attn）")
-    parser.add_argument("--deepspeed", action="store_true", help="启用 DeepSpeed")
-    parser.add_argument("--torch_compile", action="store_true", help="启用 torch.compile")
-    parser.add_argument("--cuda_kernel", action="store_true", help="启用 BigVGAN 自定义 CUDA kernel")
+    parser.add_argument("--bf16", action="store_true", help="Use bfloat16 (requires GPU support)")
+    parser.add_argument("--qwen_emo", action="store_true", help="Load QwenEmotion (enables emotion text control)")
+    parser.add_argument("--accel", action="store_true", help="Enable GPT2 acceleration engine (requires flash-attn)")
+    parser.add_argument("--deepspeed", action="store_true", help="Enable DeepSpeed")
+    parser.add_argument("--torch_compile", action="store_true", help="Enable torch.compile")
+    parser.add_argument("--cuda_kernel", action="store_true", help="Enable BigVGAN custom CUDA kernel")
     args = parser.parse_args()
     SERVER_ARGS = args
     global VOICES_DIR

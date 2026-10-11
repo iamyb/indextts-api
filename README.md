@@ -1,103 +1,103 @@
 # IndexTTS-2.5 API Server
 
-把 [IndexTTS-2.5](https://github.com/index-tts/index-tts) 封装成一个 **FastAPI HTTP 服务**，
-提供原生 REST 接口和 **OpenAI 兼容** 的 `/v1/audio/speech` + 音色管理接口，支持 Docker 一键部署。
+Wraps [IndexTTS-2.5](https://github.com/index-tts/index-tts) as a **FastAPI HTTP service**,
+providing native REST endpoints and **OpenAI-compatible** `/v1/audio/speech` + voice management endpoints, with one-click Docker deployment.
 
-> 本仓库是**薄封装**：只包含 API 服务代码和 Docker 部署文件。
-> 上游 index-tts 源码和模型权重**都不在仓库里**——
-> 源码在 Docker 构建时自动 `git clone`，模型在运行时通过 volume 挂载。
+> This repo is a **thin wrapper**: it only contains the API service code and Docker deployment files.
+> The upstream index-tts source code and model weights are **not in this repo** —
+> the source is automatically `git clone`d during Docker build, and models are mounted at runtime via volumes.
 
-## 特性
+## Features
 
-- **原生接口**：`/tts`（multipart）、`/tts/json`、`/tts/stream`（SSE 流式）
-- **OpenAI 兼容**：`POST /v1/audio/speech`，可直接对接 OpenAI SDK 生态
-- **音色管理**：`GET/POST/DELETE /v1/voices`，上传参考音频即可克隆音色
-- **模型专属参数**：通过 `extra_params` 传入（情感向量、语言、文本归一化等）
-- **Docker 部署**：镜像只含代码+依赖，模型运行时挂载，构建时自动拉取上游代码
-- **GPU 串行化**：单卡推理用锁串行，防并发 OOM
+- **Native endpoints**: `/tts` (multipart), `/tts/json`, `/tts/stream` (SSE streaming)
+- **OpenAI-compatible**: `POST /v1/audio/speech`, directly compatible with the OpenAI SDK ecosystem
+- **Voice management**: `GET/POST/DELETE /v1/voices` — upload reference audio to clone a voice
+- **Model-specific parameters**: passed via `extra_params` (emotion vector, language, text normalization, etc.)
+- **Docker deployment**: image contains only code + dependencies; models are mounted at runtime; upstream code is auto-cloned at build time
+- **GPU serialization**: single-GPU inference is serialized with a lock to prevent concurrent OOM
 
-## 目录结构
+## Directory Structure
 
 ```
 .
-├── api_server.py        # FastAPI 服务（核心）
-├── Dockerfile           # 构建镜像（自动 clone 上游 index-tts）
-├── docker-compose.yml   # 一键部署
-├── .dockerignore        # 构建上下文排除项
+├── api_server.py        # FastAPI service (core)
+├── Dockerfile           # Build image (auto-clones upstream index-tts)
+├── docker-compose.yml   # One-click deployment
+├── .dockerignore        # Build context exclusions
 └── README.md
 ```
 
-## 前置条件
+## Prerequisites
 
 1. **NVIDIA GPU** + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-   （IndexTTS-2.5 建议 12GB+ 显存）
+   (IndexTTS-2.5 recommends 12GB+ VRAM)
 2. **Docker** + Docker Compose
-3. **模型权重**：放到宿主机 `./checkpoints/` 目录，包含：
-   - `gpt.pth`、`s2mel.pth`、`codec.pth`、`tiktoken`、`wav2vec2bert_stats.pt`
-   - `hf_cache/`（w2v-bert-2.0、semantic_codec_model.safetensors、campplus_cn_common.bin、bigvgan/）
+3. **Model weights**: place in the host `./checkpoints/` directory, containing:
+   - `gpt.pth`, `s2mel.pth`, `codec.pth`, `tiktoken`, `wav2vec2bert_stats.pt`
+   - `hf_cache/` (w2v-bert-2.0, semantic_codec_model.safetensors, campplus_cn_common.bin, bigvgan/)
 
-   模型可从 HuggingFace 下载（国内可用 `https://hf-mirror.com` 镜像）。
+   Models can be downloaded from HuggingFace (use `https://hf-mirror.com` mirror in China).
 
-## 快速开始（Docker）
+## Quick Start (Docker)
 
 ```bash
-# 1. 把模型权重放到 ./checkpoints/（见上）
-# 2. 构建并启动（首次构建会 clone 上游代码 + 装依赖，较慢）
+# 1. Place model weights in ./checkpoints/ (see above)
+# 2. Build and start (first build clones upstream code + installs deps, may be slow)
 docker compose up -d --build
 
-# 3. 查看日志（模型加载约 1-2 分钟）
+# 3. Check logs (model loading takes ~1-2 minutes)
 docker compose logs -f
 
-# 4. 健康检查
+# 4. Health check
 curl http://127.0.0.1:8000/health
 # => {"status":"ok","model_loaded":true,"device":"cuda:0","gpu":true}
 ```
 
-> **国内网络**：构建期下载 astral.sh / github / pypi 可能需要代理，通过环境变量传入：
+> **China network**: downloading astral.sh / github / pypi during build may require a proxy. Pass via environment variables:
 > ```bash
 > HTTP_PROXY=http://<host>:<port> HTTPS_PROXY=http://<host>:<port> docker compose build
 > ```
-> 运行时容器内不走代理（compose 已清空）。
+> At runtime, the container does not use a proxy (compose clears them).
 
-### 锁定上游版本
+### Pinning the Upstream Version
 
-默认构建 `main` 分支。要锁定版本，设置 `INDEXTTS_REF`：
+By default, the `main` branch is built. To pin a version, set `INDEXTTS_REF`:
 
 ```bash
 INDEXTTS_REF=v2.5 docker compose up -d --build
 ```
 
-## API 接口
+## API Endpoints
 
-### 原生接口
+### Native Endpoints
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/health` | 健康检查 |
-| `POST` | `/tts` | multipart：`text` + `ref_audio`（上传）+ `lang` → WAV |
-| `POST` | `/tts/json` | JSON 体：`ref_audio` 用本地路径 → WAV |
-| `POST` | `/tts/stream` | SSE 流式返回 base64 音频分块 |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `POST` | `/tts` | multipart: `text` + `ref_audio` (upload) + `lang` → WAV |
+| `POST` | `/tts/json` | JSON body: `ref_audio` via local path → WAV |
+| `POST` | `/tts/stream` | SSE streaming with base64 audio chunks |
 
 ```bash
 curl -X POST http://127.0.0.1:8000/tts \
-  -F "text=你好" -F "ref_audio=@voice_01.wav" -F "lang=ZH" -o out.wav
+  -F "text=Hello" -F "ref_audio=@voice_01.wav" -F "lang=ZH" -o out.wav
 ```
 
-### OpenAI 兼容接口
+### OpenAI-Compatible Endpoints
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `POST` | `/v1/audio/speech` | 文本转语音 → 16-bit PCM WAV |
-| `GET` | `/v1/voices` | 列出音色 |
-| `POST` | `/v1/voices` | 上传音色（需 `consent` 授权声明） |
-| `DELETE` | `/v1/voices/{voice_id}` | 删除音色 |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/audio/speech` | Text-to-speech → 16-bit PCM WAV |
+| `GET` | `/v1/voices` | List voices |
+| `POST` | `/v1/voices` | Upload a voice (requires `consent` declaration) |
+| `DELETE` | `/v1/voices/{voice_id}` | Delete a voice |
 
-**`/v1/audio/speech` 请求体：**
+**`/v1/audio/speech` request body:**
 
 ```json
 {
   "model": "indextts",
-  "input": "你好，这是 OpenAI 兼容接口。",
+  "input": "Hello, this is the OpenAI-compatible endpoint.",
   "voice": "voice_01",
   "response_format": "wav",
   "speed": 1.0,
@@ -108,55 +108,55 @@ curl -X POST http://127.0.0.1:8000/tts \
 }
 ```
 
-- `speed`：范围 `[0.5, 2.0]`，越界返回 422；映射为 `duration_factor = 1/speed`（原生变速，不重采样）
-- `extra_params`：模型专属参数，优先级高于扁平字段。支持键：
-  `lang`、`text_normalization`、`emo_vector`（8 维情感向量）、`emo_alpha`、
-  `emo_text`、`use_emo_text`、`emo_audio`、`use_random`
+- `speed`: range `[0.5, 2.0]`, out of range returns 422; maps to `duration_factor = 1/speed` (native speed change, no resampling)
+- `extra_params`: model-specific parameters, takes priority over flat fields. Supported keys:
+  `lang`, `text_normalization`, `emo_vector` (8-dim emotion vector), `emo_alpha`,
+  `emo_text`, `use_emo_text`, `emo_audio`, `use_random`
 
 ```bash
 curl -s -o out.wav -w "%{http_code}\n" -X POST http://127.0.0.1:8000/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"input":"你好","voice":"voice_01","extra_params":{"lang":"zh"}}'
+  -d '{"input":"Hello","voice":"voice_01","extra_params":{"lang":"zh"}}'
 ```
 
-**音色管理：**
+**Voice management:**
 
 ```bash
-# 上传（consent 必填，音色克隆授权声明）
+# Upload (consent is required — voice cloning consent declaration)
 curl -X POST http://127.0.0.1:8000/v1/voices \
   -F "file=@voice_01.wav" -F "name=my_voice" \
   -F "consent=I confirm I have the right to use this voice"
 
-# 列出
+# List
 curl http://127.0.0.1:8000/v1/voices
 
-# 删除
+# Delete
 curl -X DELETE http://127.0.0.1:8000/v1/voices/my_voice
 ```
 
-音色 id = 文件名去扩展名，只允许字母数字 `-` `_`。
+Voice ID = filename without extension; only alphanumeric, `-`, `_` are allowed.
 
-## 不依赖 Docker 直接运行
+## Running Without Docker
 
 ```bash
-# 在 index-tts 源码目录，用 conda/venv 装好依赖后：
+# In the index-tts source directory, after installing dependencies via conda/venv:
 env -u http_proxy -u https_proxy -u all_proxy \
   USE_MODELSCOPE=false HF_ENDPOINT=https://hf-mirror.com \
   python api_server.py --port 8000 --model_dir ./checkpoints
 ```
 
-可选参数：`--bf16`、`--qwen_emo`、`--accel`、`--deepspeed`、`--torch_compile`、`--cuda_kernel`。
+Optional flags: `--bf16`, `--qwen_emo`, `--accel`, `--deepspeed`, `--torch_compile`, `--cuda_kernel`.
 
-## 环境变量
+## Environment Variables
 
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `MODEL_DIR` | `/models/checkpoints` | 模型权重目录 |
-| `VOICES_DIR` | `voices` | 音色参考音频目录 |
-| `INDEXTTS_REF` | `main` | 构建时 clone 的上游分支/tag/commit |
-| `HTTP_PROXY` / `HTTPS_PROXY` | 空 | 构建期代理（仅构建时需要） |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MODEL_DIR` | `/models/checkpoints` | Model weights directory |
+| `VOICES_DIR` | `voices` | Voice reference audio directory |
+| `INDEXTTS_REF` | `main` | Upstream branch/tag/commit to clone at build time |
+| `HTTP_PROXY` / `HTTPS_PROXY` | empty | Build-time proxy (only needed during build) |
 
-## 许可
+## License
 
-本仓库的 API 封装代码遵循上游 [IndexTTS](https://github.com/index-tts/index-tts) 的许可条款。
-模型权重请遵守其各自的许可协议。
+The API wrapper code in this repo follows the upstream [IndexTTS](https://github.com/index-tts/index-tts) license terms.
+Model weights are subject to their respective license agreements.

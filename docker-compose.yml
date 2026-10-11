@@ -1,16 +1,16 @@
-# IndexTTS-2.5 API 服务（Docker 部署）
+# IndexTTS-2.5 API service (Docker deployment)
 #
-# 前置条件：宿主机 ./checkpoints/ 已包含全部模型权重
-#   （gpt.pth / s2mel.pth / codec.pth / tiktoken / wav2vec2bert_stats.pt / hf_cache/）
+# Prerequisites: host ./checkpoints/ must contain all model weights
+#   (gpt.pth / s2mel.pth / codec.pth / tiktoken / wav2vec2bert_stats.pt / hf_cache/)
 #
-# 使用：
-#   docker compose up -d --build     # 构建并启动
-#   docker compose logs -f           # 查看日志（模型加载约 1-2 分钟）
+# Usage:
+#   docker compose up -d --build     # Build and start
+#   docker compose logs -f           # Check logs (model loading takes ~1-2 minutes)
 #   curl http://127.0.0.1:8000/health
 #
-# 测试合成：
+# Test synthesis:
 #   curl -X POST http://127.0.0.1:8000/tts \
-#     -F "text=你好" -F "ref_audio=@examples/voice_01.wav" -F "lang=ZH" -o out.wav
+#     -F "text=Hello" -F "ref_audio=@examples/voice_01.wav" -F "lang=ZH" -o out.wav
 
 services:
   indextts-api:
@@ -18,10 +18,10 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # 锁定上游版本（tag/commit），默认 main
+        # Pin upstream version (tag/commit), defaults to main
         INDEXTTS_REF: ${INDEXTTS_REF:-main}
-        # 构建期代理（国内网络下载 astral.sh/github/pypi 需要；不需要则留空）。
-        # 通过环境变量传入，例如：HTTP_PROXY=http://host:port docker compose build
+        # Build-time proxy (needed for downloading astral.sh/github/pypi on China networks; leave empty if not needed).
+        # Pass via environment variables, e.g.: HTTP_PROXY=http://host:port docker compose build
         http_proxy: ${HTTP_PROXY:-}
         https_proxy: ${HTTPS_PROXY:-}
     image: indextts-api:latest
@@ -29,20 +29,20 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # 模型目录（容器内路径，与 Dockerfile 中 VOLUME 一致）
+      # Model directory (in-container path, matches VOLUME in Dockerfile)
       MODEL_DIR: /models/checkpoints
-      # 音色目录（OpenAI 兼容接口用）
+      # Voices directory (for OpenAI-compatible endpoints)
       VOICES_DIR: /models/voices
-      # 容器内不走代理
+      # No proxy inside the container
       http_proxy: ""
       https_proxy: ""
       all_proxy: ""
-      # 防止启动时尝试联网下载模型（模型已挂载）
+      # Prevent attempting to download models from the network at startup (models are already mounted)
       USE_MODELSCOPE: "false"
     volumes:
-      # 宿主机模型目录 -> 容器（只读）
+      # Host model directory -> container (read-only)
       - ./checkpoints:/models/checkpoints:ro
-      # 音色目录（OpenAI 兼容接口的参考音频，可读写）
+      # Voices directory (reference audio for OpenAI-compatible endpoints, read-write)
       - ./voices:/models/voices
     deploy:
       resources:
@@ -51,13 +51,13 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    # 可选：需要情感文本控制时取消注释
+    # Optional: uncomment to enable emotion text control
     # command: ["python", "api_server.py", "--host", "0.0.0.0", "--port", "8000", "--qwen_emo"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
       interval: 30s
       timeout: 10s
-      # 模型加载需要 1-2 分钟，给足启动时间
+      # Model loading takes 1-2 minutes; allow sufficient startup time
       start_period: 300s
       retries: 3
