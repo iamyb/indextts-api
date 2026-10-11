@@ -1,0 +1,63 @@
+# IndexTTS-2.5 API 服务（Docker 部署）
+#
+# 前置条件：宿主机 ./checkpoints/ 已包含全部模型权重
+#   （gpt.pth / s2mel.pth / codec.pth / tiktoken / wav2vec2bert_stats.pt / hf_cache/）
+#
+# 使用：
+#   docker compose up -d --build     # 构建并启动
+#   docker compose logs -f           # 查看日志（模型加载约 1-2 分钟）
+#   curl http://127.0.0.1:8000/health
+#
+# 测试合成：
+#   curl -X POST http://127.0.0.1:8000/tts \
+#     -F "text=你好" -F "ref_audio=@examples/voice_01.wav" -F "lang=ZH" -o out.wav
+
+services:
+  indextts-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 锁定上游版本（tag/commit），默认 main
+        INDEXTTS_REF: ${INDEXTTS_REF:-main}
+        # 构建期代理（国内网络下载 astral.sh/github/pypi 需要；不需要则留空）。
+        # 通过环境变量传入，例如：HTTP_PROXY=http://host:port docker compose build
+        http_proxy: ${HTTP_PROXY:-}
+        https_proxy: ${HTTPS_PROXY:-}
+    image: indextts-api:latest
+    container_name: indextts-api
+    ports:
+      - "8000:8000"
+    environment:
+      # 模型目录（容器内路径，与 Dockerfile 中 VOLUME 一致）
+      MODEL_DIR: /models/checkpoints
+      # 音色目录（OpenAI 兼容接口用）
+      VOICES_DIR: /models/voices
+      # 容器内不走代理
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
+      # 防止启动时尝试联网下载模型（模型已挂载）
+      USE_MODELSCOPE: "false"
+    volumes:
+      # 宿主机模型目录 -> 容器（只读）
+      - ./checkpoints:/models/checkpoints:ro
+      # 音色目录（OpenAI 兼容接口的参考音频，可读写）
+      - ./voices:/models/voices
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # 可选：需要情感文本控制时取消注释
+    # command: ["python", "api_server.py", "--host", "0.0.0.0", "--port", "8000", "--qwen_emo"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      # 模型加载需要 1-2 分钟，给足启动时间
+      start_period: 300s
+      retries: 3
