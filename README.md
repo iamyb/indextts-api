@@ -13,7 +13,7 @@ providing native REST endpoints and **OpenAI-compatible** `/v1/audio/speech` + v
 - **OpenAI-compatible**: `POST /v1/audio/speech`, directly compatible with the OpenAI SDK ecosystem
 - **Voice management**: `GET/POST/DELETE /v1/voices` — upload reference audio to clone a voice
 - **Model-specific parameters**: passed via `extra_params` (emotion vector, language, text normalization, etc.)
-- **Docker deployment**: image contains only code + dependencies; models are mounted at runtime; upstream code is auto-cloned at build time
+- **Docker deployment**: pre-built images on [GHCR](https://ghcr.io/iamyb/indextts-api) (just `docker pull`); image contains only code + dependencies, models are mounted at runtime
 - **GPU serialization**: single-GPU inference is serialized with a lock to prevent concurrent OOM
 
 ## Directory Structure
@@ -38,19 +38,44 @@ providing native REST endpoints and **OpenAI-compatible** `/v1/audio/speech` + v
 
    Models can be downloaded from HuggingFace (use `https://hf-mirror.com` mirror in China).
 
-## Quick Start (Docker)
+## Quick Start (Pre-built Image)
+
+Pre-built images are published to [GitHub Container Registry](https://ghcr.io) on every release —
+no local build needed:
 
 ```bash
-# 1. Place model weights in ./checkpoints/ (see above)
-# 2. Build and start (first build clones upstream code + installs deps, may be slow)
-docker compose up -d --build
+# 1. Place model weights in ./checkpoints/ (see Prerequisites)
+# 2. Pull and run (image is ~14GB, first pull may take a while)
+docker pull ghcr.io/iamyb/indextts-api:latest
+docker run -d --name indextts-api --gpus all -p 8000:8000 \
+  -v $(pwd)/checkpoints:/models/checkpoints:ro \
+  -v $(pwd)/voices:/models/voices \
+  ghcr.io/iamyb/indextts-api:latest
 
 # 3. Check logs (model loading takes ~1-2 minutes)
-docker compose logs -f
+docker logs -f indextts-api
 
 # 4. Health check
 curl http://127.0.0.1:8000/health
 # => {"status":"ok","model_loaded":true,"device":"cuda:0","gpu":true}
+```
+
+Pinned versions are also available, e.g. `ghcr.io/iamyb/indextts-api:0.1.1`.
+
+> **China network**: `ghcr.io` may be slow or unreachable. Options:
+> - use a GHCR mirror/proxy for `docker pull`, or
+> - build locally with a proxy (see [Building from Source](#building-from-source)).
+
+## Building from Source
+
+If you need to build the image yourself (e.g. to pin a specific upstream commit):
+
+```bash
+# First build clones upstream code + installs deps, may be slow
+docker compose up -d --build
+
+# Pin the upstream index-tts version (branch/tag/commit), defaults to main
+INDEXTTS_REF=v2.5 docker compose up -d --build
 ```
 
 > **China network**: downloading astral.sh / github / pypi during build may require a proxy. Pass via environment variables:
@@ -59,32 +84,12 @@ curl http://127.0.0.1:8000/health
 > ```
 > At runtime, the container does not use a proxy (compose clears them).
 
-### Pinning the Upstream Version
+### Releasing a New Image
 
-By default, the `main` branch is built. To pin a version, set `INDEXTTS_REF`:
-
-```bash
-INDEXTTS_REF=v2.5 docker compose up -d --build
-```
-
-### Published Images (GHCR)
-
-Pre-built images are published to [GitHub Container Registry](https://ghcr.io) on every `v*` tag
-(via GitHub Actions, no local build needed):
+Push a `v*` tag and GitHub Actions builds + pushes to GHCR automatically:
 
 ```bash
-# Pull and run a published image
-docker pull ghcr.io/iamyb/indextts-api:latest
-docker run -d --gpus all -p 8000:8000 \
-  -v /path/to/checkpoints:/models/checkpoints:ro \
-  -v /path/to/voices:/models/voices \
-  ghcr.io/iamyb/indextts-api:latest
-```
-
-To release a new version, just push a tag:
-
-```bash
-git tag v0.1.1 && git push origin v0.1.1
+git tag v0.1.2 && git push origin v0.1.2
 ```
 
 The upstream index-tts version used by the CI build is controlled by the repo
