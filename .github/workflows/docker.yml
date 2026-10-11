@@ -1,0 +1,87 @@
+# Build and push the IndexTTS-2.5 API image to GHCR on version tags.
+#
+# Usage:
+#   git tag v0.1.1 && git push origin v0.1.1
+#
+# Resulting images:
+#   ghcr.io/iamyb/indextts-api:v0.1.1
+#   ghcr.io/iamyb/indextts-api:latest
+name: Docker
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Allow manual runs from the Actions tab (uses the selected branch's SHA as tag)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (defaults to git SHA for manual runs)'
+        required: false
+        default: ''
+      indextts_ref:
+        description: 'Upstream index-tts branch/tag/commit (INDEXTTS_REF)'
+        required: false
+        default: 'main'
+
+# Only one build per tag at a time
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  # Lowercase is required for GHCR image names
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine image tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            [ -z "$TAG" ] && TAG="sha-${GITHUB_SHA::12}"
+          else
+            TAG="${GITHUB_REF_NAME#v}"   # v0.1.1 -> 0.1.1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building image tag: $TAG"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          # Pin the upstream index-tts version (branch/tag/commit).
+          # For tag-triggered builds, set the repo variable INDEXTTS_REF
+          # (Settings -> Variables) to pin it, e.g. v2.5; defaults to main.
+          build-args: |
+            INDEXTTS_REF=${{ github.event.inputs.indextts_ref || vars.INDEXTTS_REF || 'main' }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -67,6 +67,29 @@ By default, the `main` branch is built. To pin a version, set `INDEXTTS_REF`:
 INDEXTTS_REF=v2.5 docker compose up -d --build
 ```
 
+### Published Images (GHCR)
+
+Pre-built images are published to [GitHub Container Registry](https://ghcr.io) on every `v*` tag
+(via GitHub Actions, no local build needed):
+
+```bash
+# Pull and run a published image
+docker pull ghcr.io/iamyb/indextts-api:latest
+docker run -d --gpus all -p 8000:8000 \
+  -v /path/to/checkpoints:/models/checkpoints:ro \
+  -v /path/to/voices:/models/voices \
+  ghcr.io/iamyb/indextts-api:latest
+```
+
+To release a new version, just push a tag:
+
+```bash
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+The upstream index-tts version used by the CI build is controlled by the repo
+variable `INDEXTTS_REF` (Settings → Variables → Actions), defaulting to `main`.
+
 ## API Endpoints
 
 ### Native Endpoints
