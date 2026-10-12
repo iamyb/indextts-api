@@ -12,8 +12,9 @@
 #   docker compose up -d
 #   # Or manually:
 #   docker run -d --gpus all -p 8000:8000 \
-#     -v /path/to/checkpoints:/models/checkpoints:ro \
+#     -v /path/to/checkpoints:/models/checkpoints \
 #     -e MODEL_DIR=/models/checkpoints indextts-api
+#   (mount writable so missing model weights can be auto-downloaded on first start)
 
 # CUDA 12.8 base image (matches torch 2.8+cu128)
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04

@@ -32,11 +32,14 @@ providing native REST endpoints and **OpenAI-compatible** `/v1/audio/speech` + v
 1. **NVIDIA GPU** + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
    (IndexTTS-2.5 recommends 12GB+ VRAM)
 2. **Docker** + Docker Compose
-3. **Model weights**: place in the host `./checkpoints/` directory, containing:
-   - `gpt.pth`, `s2mel.pth`, `codec.pth`, `tiktoken`, `wav2vec2bert_stats.pt`
-   - `hf_cache/` (w2v-bert-2.0, semantic_codec_model.safetensors, campplus_cn_common.bin, bigvgan/)
-
-   Models can be downloaded from HuggingFace (use `https://hf-mirror.com` mirror in China).
+3. **Model weights** (optional — auto-downloaded on first start): the server checks
+   `./checkpoints/` for the primary files (`gpt.pth`, `s2mel.pth`, `codec.pth`, `tiktoken`,
+   `wav2vec2bert_stats.pt`) and, if any are missing, automatically downloads the
+   `IndexTeam/IndexTTS-2.5` repo (HuggingFace, or ModelScope/hf-mirror in China) plus the
+   auxiliary models into `hf_cache/` (w2v-bert-2.0, semantic_codec_model.safetensors,
+   campplus_cn_common.bin, bigvgan/). The download is ~11GB and the mount must be
+   **writable** (no `:ro`). Set `AUTO_DOWNLOAD_MODELS=0` to disable auto-download and
+   require pre-downloaded weights.
 
 ## Quick Start (Pre-built Image)
 
@@ -44,18 +47,19 @@ Pre-built images are published to [GitHub Container Registry](https://ghcr.io) o
 no local build needed:
 
 ```bash
-# 1. Place model weights in ./checkpoints/ (see Prerequisites)
-# 2. Pull and run (image is ~14GB, first pull may take a while)
+# 1. Pull and run (image is ~14GB, first pull may take a while)
+#    On first start the server auto-downloads ~11GB of model weights into ./checkpoints/
+#    (the mount is writable on purpose — remove :ro if you pre-download the weights)
 docker pull ghcr.io/iamyb/indextts-api:latest
 docker run -d --name indextts-api --gpus all -p 8000:8000 \
-  -v $(pwd)/checkpoints:/models/checkpoints:ro \
+  -v $(pwd)/checkpoints:/models/checkpoints \
   -v $(pwd)/voices:/models/voices \
   ghcr.io/iamyb/indextts-api:latest
 
-# 3. Check logs (model loading takes ~1-2 minutes)
+# 2. Check logs (first start: model download + loading may take a while)
 docker logs -f indextts-api
 
-# 4. Health check
+# 3. Health check
 curl http://127.0.0.1:8000/health
 # => {"status":"ok","model_loaded":true,"device":"cuda:0","gpu":true}
 ```
@@ -180,6 +184,7 @@ Optional flags: `--bf16`, `--qwen_emo`, `--accel`, `--deepspeed`, `--torch_compi
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MODEL_DIR` | `/models/checkpoints` | Model weights directory |
+| `AUTO_DOWNLOAD_MODELS` | `1` | Auto-download missing model weights on startup (`0` to disable) |
 | `VOICES_DIR` | `voices` | Voice reference audio directory |
 | `INDEXTTS_REF` | `main` | Upstream branch/tag/commit to clone at build time |
 | `HTTP_PROXY` / `HTTPS_PROXY` | empty | Build-time proxy (only needed during build) |

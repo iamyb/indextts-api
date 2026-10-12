@@ -37,11 +37,11 @@ services:
       http_proxy: ""
       https_proxy: ""
       all_proxy: ""
-      # Prevent attempting to download models from the network at startup (models are already mounted)
-      USE_MODELSCOPE: "false"
+      # Set to "0" to disable auto-download of missing model weights
+      AUTO_DOWNLOAD_MODELS: "1"
     volumes:
-      # Host model directory -> container (read-only)
-      - ./checkpoints:/models/checkpoints:ro
+      # Host model directory -> container (writable so missing weights can be auto-downloaded)
+      - ./checkpoints:/models/checkpoints
       # Voices directory (reference audio for OpenAI-compatible endpoints, read-write)
       - ./voices:/models/voices
     deploy:

@@ -53,12 +53,57 @@ SERVER_ARGS = None
 # Voices directory (OpenAI-compatible voice IDs map to audio files here)
 VOICES_DIR = os.environ.get("VOICES_DIR", "voices")
 
+# Primary model files required for IndexTTS-2.5 (same list as webui.py)
+REQUIRED_MODEL_FILES = [
+    "gpt.pth",
+    "s2mel.pth",
+    "codec.pth",
+    "multilingual_zh_ja_yue_char_del.tiktoken",
+    "wav2vec2bert_stats.pt",
+]
+MODEL_REPO_ID = "IndexTeam/IndexTTS-2.5"
+
+
+def _ensure_primary_models(model_dir: str) -> None:
+    """Auto-download the primary model repo if any required file is missing.
+
+    Mirrors the startup logic in upstream webui.py: check required files,
+    snapshot_download the whole repo if incomplete, then verify again.
+    Disable with AUTO_DOWNLOAD_MODELS=0 (e.g. when model_dir is read-only).
+    """
+    if os.environ.get("AUTO_DOWNLOAD_MODELS", "1") == "0":
+        return
+    missing = [f for f in REQUIRED_MODEL_FILES
+               if not os.path.isfile(os.path.join(model_dir, f))]
+    if not missing:
+        return
+    if not os.access(model_dir, os.W_OK):
+        raise FileNotFoundError(
+            f"Model directory {model_dir} is missing {', '.join(missing)} and is "
+            f"read-only, so auto-download is not possible. Pre-download the models "
+            f"or mount a writable directory (set AUTO_DOWNLOAD_MODELS=0 to skip)."
+        )
+    print(f">> Model directory {model_dir} is incomplete (missing: {', '.join(missing)}). "
+          f"Downloading {MODEL_REPO_ID} ...")
+    from indextts.utils.model_download import snapshot_download
+    snapshot_download(MODEL_REPO_ID, local_dir=model_dir)
+    missing = [f for f in REQUIRED_MODEL_FILES
+               if not os.path.isfile(os.path.join(model_dir, f))]
+    if missing:
+        raise FileNotFoundError(
+            f"Failed to download model to {model_dir} (still missing: {', '.join(missing)}). "
+            f"Please download it manually from {MODEL_REPO_ID}."
+        )
+    print(">> Primary models downloaded successfully.")
+
 
 def build_tts(args):
     """Build an IndexTTS2 instance (same logic as build_tts in webui.py)."""
     from indextts.infer_v2_5 import IndexTTS2
 
     model_dir = args.model_dir
+    _ensure_primary_models(model_dir)
+
     cfg_path = os.path.join(model_dir, "config.yaml")
     if not os.path.isfile(cfg_path):
         raise FileNotFoundError(f"Config file not found: {cfg_path}")
