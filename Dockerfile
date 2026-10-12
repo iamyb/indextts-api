@@ -74,6 +74,7 @@ RUN uv sync --frozen --extra webui \
 # 3) Copy this project's API service (thin wrapper, only depends on the upstream indextts package)
 # ---------------------------------------------------------------------------
 COPY api_server.py /app/api_server.py
+COPY test.html /app/test.html
 
 # Model + voices mount points (empty directory placeholders, overridden by volumes at runtime)
 RUN mkdir -p /models/checkpoints /models/voices

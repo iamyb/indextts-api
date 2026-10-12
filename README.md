@@ -10,6 +10,7 @@ providing native REST endpoints and **OpenAI-compatible** `/v1/audio/speech` + v
 ## Features
 
 - **Native endpoints**: `/tts` (multipart), `/tts/json`, `/tts/stream` (SSE streaming)
+- **Remote reference audio**: all endpoints accept http(s) URLs for reference audio (max 20 MB, SSRF-protected)
 - **OpenAI-compatible**: `POST /v1/audio/speech`, directly compatible with the OpenAI SDK ecosystem
 - **Voice management**: `GET/POST/DELETE /v1/voices` — upload reference audio to clone a voice
 - **Model-specific parameters**: passed via `extra_params` (emotion vector, language, text normalization, etc.)
@@ -106,13 +107,23 @@ variable `INDEXTTS_REF` (Settings → Variables → Actions), defaulting to `mai
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
-| `POST` | `/tts` | multipart: `text` + `ref_audio` (upload) + `lang` → WAV |
-| `POST` | `/tts/json` | JSON body: `ref_audio` via local path → WAV |
-| `POST` | `/tts/stream` | SSE streaming with base64 audio chunks |
+| `GET` | `/test` | Minimal HTML test page (upload or URL reference audio, inline playback) |
+| `POST` | `/tts` | multipart: `text` + `ref_audio` (upload) or `ref_audio_url` (http/https) + `lang` → WAV |
+| `POST` | `/tts/json` | JSON body: `ref_audio` via local path or http(s) URL → WAV |
+| `POST` | `/tts/stream` | SSE streaming with base64 audio chunks (file upload or URL) |
+
+Reference audio can be a file upload, a local path, or a remote http(s) URL
+(max 20 MB, 10 s timeout, SSRF-protected). Example voices are available at
+https://iamyb.github.io/voice-zero-zh/.
 
 ```bash
+# File upload
 curl -X POST http://127.0.0.1:8000/tts \
   -F "text=Hello" -F "ref_audio=@voice_01.wav" -F "lang=ZH" -o out.wav
+
+# Remote URL
+curl -X POST http://127.0.0.1:8000/tts \
+  -F "text=Hello" -F "ref_audio_url=https://iamyb.github.io/voice-zero-zh/voices/aishell1/S0002.wav" -F "lang=ZH" -o out.wav
 ```
 
 ### OpenAI-Compatible Endpoints

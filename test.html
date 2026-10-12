@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IndexTTS-2.5 API Test</title>
+<style>
+  :root { --bg:#f4f6fa; --card:#ffffff; --border:#d9dee8; --text:#1f2430; --muted:#6b7280; --accent:#2f6fe4; --accent2:#1f5bc9; --ok:#17a060; --err:#d93a3a; --field:#fafbfd; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background:var(--bg); color:var(--text); line-height:1.5; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 20px; margin: 8px 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  label { display:block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  label:first-child { margin-top: 0; }
+  input[type=text], input[type=url], input[type=number], textarea, select {
+    width: 100%; padding: 10px 12px; background: var(--field); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 14px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+  .tab { flex:1; text-align:center; padding: 8px; border-radius: 8px; border:1px solid var(--border); cursor:pointer; font-size:13px; color:var(--muted); background:var(--field); }
+  .tab.active { border-color: var(--accent); color: var(--accent2); background: rgba(47,111,228,.08); }
+  .hidden { display: none; }
+  .filedrop { border: 1px dashed var(--border); border-radius: 8px; padding: 14px; text-align:center; color: var(--muted); font-size: 13px; cursor: pointer; background:var(--field); }
+  .filedrop:hover { border-color: var(--accent); }
+  .filedrop.has { color: var(--ok); border-color: var(--ok); }
+  button { width: 100%; margin-top: 18px; padding: 12px; background: var(--accent); color:#fff; border:none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button:hover { background: var(--accent2); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .status { margin-top: 14px; font-size: 13px; min-height: 18px; }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  audio { width: 100%; margin-top: 14px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .chk { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); margin-top:12px; cursor:pointer; }
+  .chk input { width:auto; }
+  .top { display:flex; justify-content:space-between; align-items:center; }
+  .docs { font-size:13px; color:var(--accent); text-decoration:none; }
+  .docs:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>IndexTTS-2.5 API Test</h1>
+    <a class="docs" id="docs" target="_blank" rel="noopener">FastAPI Docs</a>
+  </div>
+  <div class="sub">Call <code>/tts</code> (multipart) to synthesize and preview audio</div>
+
+  <div class="card">
+    <label>Text to synthesize</label>
+    <textarea id="text" placeholder="Enter text to synthesize…">你好，欢迎使用 IndexTTS 语音合成服务。</textarea>
+
+    <label>Language</label>
+    <select id="lang">
+      <option value="ZH" selected>Chinese (ZH)</option>
+      <option value="EN">English (EN)</option>
+      <option value="JA">Japanese (JA)</option>
+      <option value="YUE">Cantonese (YUE)</option>
+    </select>
+
+    <label>Reference audio (voice)</label>
+    <div class="tabs">
+      <div class="tab" data-mode="file">Upload file</div>
+      <div class="tab active" data-mode="url">Remote URL</div>
+    </div>
+    <div id="ref-file" class="hidden">
+      <div class="filedrop" id="refdrop">Click to select an audio file (wav/mp3/flac/ogg/m4a)</div>
+      <input type="file" id="refinput" accept=".wav,.mp3,.flac,.ogg,.m4a,.aac,.wma" class="hidden">
+    </div>
+    <div id="ref-url">
+      <input type="url" id="refurl" placeholder="https://example.com/voice.wav">
+      <div class="hint">Example voices: <a href="https://iamyb.github.io/voice-zero-zh/" target="_blank" rel="noopener">https://iamyb.github.io/voice-zero-zh/</a></div>
+    </div>
+
+    <label class="chk"><input type="checkbox" id="useemo"> Use emotion reference audio (optional)</label>
+    <div id="emo-wrap" class="hidden">
+      <div class="tabs" style="margin-top:10px;">
+        <div class="tab" data-emomode="file">Upload file</div>
+        <div class="tab active" data-emomode="url">Remote URL</div>
+      </div>
+      <div id="emo-file" class="hidden">
+        <div class="filedrop" id="emodrop">Click to select emotion reference audio</div>
+        <input type="file" id="emoinput" accept=".wav,.mp3,.flac,.ogg,.m4a,.aac,.wma" class="hidden">
+      </div>
+      <div id="emo-url">
+        <input type="url" id="emourl" placeholder="https://example.com/emo.wav">
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>Emotion intensity (emo_alpha)</label>
+          <input type="number" id="emoalpha" value="1.0" step="0.1" min="0" max="3">
+        </div>
+      </div>
+    </div>
+
+    <button id="go">Synthesize</button>
+    <div class="status" id="status"></div>
+    <div id="result" class="hidden">
+      <audio id="player" controls></audio>
+      <div class="hint" id="meta"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// Same origin when served by the API; default port when opened as a file.
+const BASE = location.protocol.startsWith('http') ? location.origin : 'http://127.0.0.1:8000';
+$('docs').href = BASE + '/docs';
+
+// Tabs: reference audio
+document.querySelectorAll('[data-mode]').forEach(t => t.onclick = () => {
+  document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const m = t.dataset.mode;
+  $('ref-file').classList.toggle('hidden', m !== 'file');
+  $('ref-url').classList.toggle('hidden', m !== 'url');
+});
+// Tabs: emotion audio
+document.querySelectorAll('[data-emomode]').forEach(t => t.onclick = () => {
+  document.querySelectorAll('[data-emomode]').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const m = t.dataset.emomode;
+  $('emo-file').classList.toggle('hidden', m !== 'file');
+  $('emo-url').classList.toggle('hidden', m !== 'url');
+});
+
+// Emotion toggle
+$('useemo').onchange = () => $('emo-wrap').classList.toggle('hidden', !$('useemo').checked);
+
+// File drop helpers
+function bindDrop(dropId, inputId) {
+  const drop = $(dropId), input = $(inputId);
+  drop.onclick = () => input.click();
+  input.onchange = () => {
+    if (input.files.length) { drop.textContent = '✓ ' + input.files[0].name; drop.classList.add('has'); }
+  };
+}
+bindDrop('refdrop', 'refinput');
+bindDrop('emodrop', 'emoinput');
+
+function refMode() { return document.querySelector('[data-mode].active').dataset.mode; }
+function emoMode() { return document.querySelector('[data-emomode].active').dataset.emomode; }
+
+$('go').onclick = async () => {
+  const status = $('status');
+  const btn = $('go');
+  status.className = 'status'; status.textContent = '';
+  $('result').classList.add('hidden');
+
+  const text = $('text').value.trim();
+  if (!text) { status.className = 'status err'; status.textContent = 'Please enter text to synthesize'; return; }
+
+  const fd = new FormData();
+  fd.append('text', text);
+  fd.append('lang', $('lang').value);
+
+  // Reference audio
+  if (refMode() === 'file') {
+    if (!$('refinput').files.length) { status.className='status err'; status.textContent='Please select a reference audio file'; return; }
+    fd.append('ref_audio', $('refinput').files[0]);
+  } else {
+    const u = $('refurl').value.trim();
+    if (!u) { status.className='status err'; status.textContent='Please enter a reference audio URL'; return; }
+    fd.append('ref_audio_url', u);
+  }
+
+  // Emotion audio (optional)
+  if ($('useemo').checked) {
+    if (emoMode() === 'file') {
+      if ($('emoinput').files.length) fd.append('emo_ref_audio', $('emoinput').files[0]);
+    } else {
+      const u = $('emourl').value.trim();
+      if (u) fd.append('emo_ref_audio_url', u);
+    }
+    fd.append('emo_alpha', $('emoalpha').value);
+  }
+
+  btn.disabled = true;
+  status.textContent = 'Synthesizing…';
+  const t0 = performance.now();
+  try {
+    const resp = await fetch(BASE + '/tts', { method: 'POST', body: fd });
+    if (!resp.ok) {
+      let msg = 'HTTP ' + resp.status;
+      try { const j = await resp.json(); if (j.detail) msg += ': ' + j.detail; } catch(e){}
+      throw new Error(msg);
+    }
+    const blob = await resp.blob();
+    const sr = resp.headers.get('X-Sample-Rate') || '?';
+    const url = URL.createObjectURL(blob);
+    $('player').src = url;
+    $('result').classList.remove('hidden');
+    $('meta').textContent = `Sample rate ${sr} Hz · ${(blob.size/1024).toFixed(1)} KB · Took ${((performance.now()-t0)/1000).toFixed(1)}s`;
+    status.className = 'status ok'; status.textContent = 'Synthesis succeeded';
+    $('player').play().catch(()=>{});
+  } catch (e) {
+    const msg = e instanceof TypeError ? `Cannot reach server at ${BASE}` : e.message;
+    status.className = 'status err'; status.textContent = 'Failed: ' + msg;
+  } finally {
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
